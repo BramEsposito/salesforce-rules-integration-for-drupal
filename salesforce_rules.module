@@ -1,0 +1,514 @@
+<?php
+
+/**
+ * Implements hook_rules_action_info().
+ *
+ * Declares any meta-data about actions for Rules in a big, associative, nested
+ * array. See also hook_rules_action_info in the rules.api.php file, and the
+ * online documentation at http://drupal.org/node/878928.
+ */
+function salesforce_rules_rules_action_info() {
+  $actions = array(
+  
+    // Further actions are just declared by appending the associative array with
+    // more entries.
+		'salesforce_rules_action_upsert_to_salesforce' => array(
+      'label' => t('Upsert data in Salesforce'),
+      'group' => t('Salesforce'),	
+			'parameter' => array(
+				'url' => array('type' => 'text', 'label' => t('Url that values will be pushed to')),
+				'event' => array('type' => 'node', 'label' => t('The event that has been subscribed to')),
+        'order' => array('type' => 'webform', 'label' => t('The order object')),
+        'orderfeedback' => array('type' => 'struct', 'label' => t('Feedback on the order object, from Ogone')),
+	      /*'submission' => array(
+	        'type' => 'webform',
+	        'label' => t('Webform submission data'),
+				),*/
+      ),
+      'callbacks' => array(
+        'form_alter' => 'salesforce_rules_type_form_alter',
+        'validate' => 'rules_action_create_type_validate',
+      ),
+		),
+    /* inspiration
+    'vub_events_action_send_push_mail_via_addemar' => array(
+      'label' => t('Send a triggered email via Addemar.com'),
+      'group' => t('Vub events'),
+      // When declaring parameters, site builders will by default get a form to
+      // select fitting data. In this case, we require the site builder to
+      // select a user object. The 'type' could be any data type known to Rules,
+      // which means any entity type known to Entity API or any additional data
+      // type declared by hook_rules_data_info – by default including things
+      // like 'integer', 'text' and more. See
+      'parameter' => array(
+        // Each parameter is keyed with an internally used machine name.
+	      'receiver' => array(
+	        'type' => 'text',
+	        'label' => t('Receiver Email Address'),
+	        'description' => t("The mail's receiver."),
+	      ),
+	      'subject' => array(
+	        'type' => 'text',
+	        'label' => t('Message Subject'),
+	        'description' => t("The subject of the email."),
+	      ),
+        'message' => array(
+          'type' => 'text',
+          'label' => t('Message'),
+          'description' => t("The mail's message body."),
+          'translatable' => TRUE,
+        ),
+        'campaignid' => array(
+          'type' => 'integer',
+          'label' => t('Campaign to which to subscribe to'),
+					'default value' => 595,
+        ),
+      ),
+    ),*/
+  );
+
+  // Don't forget to return the array of action information!
+  return $actions;
+}
+
+function salesforce_rules_type_form_alter(&$form, &$form_state, $form_id) {
+  dpm($form);
+  dpm($form_state);
+  dpm($form_id);
+
+  $form['choice_wrapper'] = array(
+    '#tree' => FALSE,
+    '#weight' => -4,
+    '#prefix' => '<div class="clearfix" id="poll-choice-wrapper">',
+    '#suffix' => '</div>',
+  );
+	
+  $form['choice_wrapper']['choice'] = array(
+    '#prefix' => '<div id="poll-choices">',
+    '#suffix' => '</div>',
+    '#theme' => 'salesforce_rules',
+  );
+
+  $form['choice_wrapper']['choice']['een']['chtext'] =  array(
+    '#type' => 'textfield',
+    '#title' => "Demo Table Form",
+    '#required' => TRUE,
+    '#default_value' =>  "Demo Table Form",
+    '#weight' => -5,
+  );
+	
+  $form['choice_wrapper']['choice']['twee']['chtext'] =  array(
+    '#type' => 'textfield',
+    '#title' => "Demo Table Form",
+    '#required' => TRUE,
+    '#default_value' =>  "Demo Table Form",
+    '#weight' => -5,
+  );
+	
+	$options = array(
+		"1"=>"een",
+		"2"=>"twee",
+		"3"=>"drie",
+	);
+	
+  $form['choice_wrapper']['choice']['drie']['chtext'] =  array('#type' => 'select',
+		'#title' => t('Object Type'),
+		'#options' => $options,
+		'#description' => t('Select which subobject type to add to this Salesforce object.'),
+    '#weight' => -5,
+  );
+  // We name our button 'poll_more' to avoid conflicts with other modules using
+  // Ajax-enabled buttons with the id 'more'.
+  $form['choice_wrapper']['poll_more'] = array(
+    '#type' => 'submit',
+    '#value' => t('More choices'),
+    '#attributes' => array(
+      'title' => t("If the amount of boxes above isn't enough, click here to add more choices."),
+    ),
+    '#weight' => 1,
+    '#limit_validation_errors' => array(array('choice')),
+    '#submit' => array('salesforce_rules_more_choices_submit'),
+    '#ajax' => array(
+      'callback' => 'poll_choice_js',
+      'wrapper' => 'poll-choices',
+      'effect' => 'fade',
+    ),
+  );
+	
+}
+
+
+/**
+ * Submit handler to add more choices to a poll form.
+ *
+ * This handler is run regardless of whether JS is enabled or not. It makes
+ * changes to the form state. If the button was clicked with JS disabled, then
+ * the page is reloaded with the complete rebuilt form. If the button was
+ * clicked with JS enabled, then ajax_form_callback() calls poll_choice_js() to
+ * return just the changed part of the form.
+ */
+function salesforce_rules_more_choices_submit($form, &$form_state) {
+  // If this is a Ajax POST, add 1, otherwise add 5 more choices to the form.
+  if ($form_state['values']['poll_more']) {
+    $n = $_GET['q'] == 'system/ajax' ? 1 : 5;
+    $form_state['choice_count'] = count($form_state['values']['choice']) + $n;
+  }
+	dpm($form);
+  // Renumber the choices. This invalidates the corresponding key/value
+  // associations in $form_state['input'], so clear that out. This requires
+  // poll_form() to rebuild the choices with the values in
+  // $form_state['node']->choice, which it does.
+  $form_state['node']->choice = array_values($form_state['values']['choice']);
+  unset($form_state['input']['choice']);
+  $form_state['rebuild'] = TRUE;
+}
+
+
+function salesforce_rules_theme() {
+  $theme_hooks = array(
+    'salesforce_rules' => array(
+      'render element' => 'form',
+    ),
+	);
+	return $theme_hooks;
+}
+
+/**
+ * Returns HTML for an admin poll form for choices.
+ *
+ * @param $variables
+ *   An associative array containing:
+ *   - form: A render element representing the form.
+ *
+ * @ingroup themeable
+ */
+function theme_salesforce_rules($variables) {
+  $form = $variables['form'];
+
+	dpm($form);
+
+  drupal_add_tabledrag('poll-choice-table', 'order', 'sibling', 'poll-weight');
+
+  $is_admin= user_access('administer nodes');
+  $delta = 0;
+  $rows = array();
+  $headers = array('', t('Choice'));
+  if ($is_admin) {
+    $headers[] = t('Vote count');
+  }
+  $headers[] = t('Weight');
+
+  foreach (element_children($form) as $key) {
+    $delta++;
+    // Set special classes for drag and drop updating.
+    $form[$key]['weight']['#attributes']['class'] = array('poll-weight');
+
+    // Build the table row.
+    $row = array(
+      'data' => array(
+        array('class' => array('choice-flag')),
+        drupal_render($form[$key]['chtext']),
+      ),
+      'class' => array('draggable'),
+    );
+    if ($is_admin) {
+      $row['data'][] = drupal_render($form[$key]['chvotes']);
+    }
+    $row['data'][] = drupal_render($form[$key]['weight']);
+
+    // Add any additional classes set on the row.
+    if (!empty($form[$key]['#attributes']['class'])) {
+      $row['class'] = array_merge($row['class'], $form[$key]['#attributes']['class']);
+    }
+
+    $rows[] = $row;
+  }
+
+  $output = theme('table', array('header' => $headers, 'rows' => $rows, 'attributes' => array('id' => 'poll-choice-table')));
+  $output .= drupal_render_children($form);
+  return $output;
+}
+
+function salesforce_rules_action_upsert_to_salesforce($url,$node,$submission,$orderfeedback) {
+  // 1) upsert in Salesforce
+  
+  // 2) STORE DATA + Salesforce Id and success status in entity
+}
+
+/**
+ * Implementation of hook_rules_submission_insert
+ * 
+ * Upsert data into Salesforce via the Salesforce API
+ */
+function salesforce_rules_rules_submission_insert($node, $submission)
+{
+	if (!isset($node->use_salesforce) || (isset($node->use_salesforce) && $node->use_salesforce == 0))
+		return;
+	
+  // TODO: add logging (which form) to salesforce when submitting
+	// TODO: create related objects
+	$components = $node->rules['components'];
+	
+	// Identify object relationships
+	
+	// 1. insert main object
+	$sf_object_id = 'node';
+	$records = _salesforce_rules_rules_submission_insert_get_records($components,$submission,$sf_object_id);
+	$objecttype = $node->salesforce_object;
+	
+	$inserted = false;
+	$keylist = _salesforce_rules_get_keylist($node->nid);
+	
+	// loop through keys until upsert succeeds
+	while(!$inserted && count($keylist) > 0) {
+		$inserted = _salesforce_rules_object_upsert_with_key($records,$objecttype,array_pop($keylist));
+	}
+	
+	// check if any key worked
+	if(!$inserted) {
+		// TODO: add failure to a field in this rules submission	
+		//error
+		db_insert('salesforce_rules_submissions')
+			->fields(array(
+				'sid' => $submission->sid,
+				'status' => 2
+			))
+			->execute();
+		
+		watchdog('salesforce_rules', 'Salesforce Upsert failed');
+		
+		return; 
+	}
+
+	// TODO: add $sfid to a field in this rules submission 
+	$sfid = $inserted;
+	
+	// 2. subscribe to Campaign: insert related campaignMember
+	if (isset($node->salesforce_campaign) && $node->salesforce_campaign != 0 && $node->salesforce_campaign != "none") {
+	  $records[0] = new stdclass();
+    $records[0]->CampaignId = $node->salesforce_campaign;
+    $records[0]->ContactId = $sfid;
+    if ($node->salesforce_campaign_status != "auto") $records[0]->Status = $node->salesforce_campaign_status;
+    
+	  salesforce_api_upsert($records,"CampaignMember");		  
+	}
+
+
+	db_insert('salesforce_rules_submissions')
+		->fields(array(
+			'sid' => $submission->sid,
+			'sfid' => $sfid,
+			'status' => 1
+		))
+		->execute();
+	
+	// 3. insert subobjects
+	// UPSERT RELATED OBJECTS
+		
+	$objects = _salesforce_rules_get_available_objects($node->nid);
+	
+	foreach ($objects as $key => $value) {
+		if ($key != 0) {
+			$object_typeextra = unserialize(_salesforce_rules_get_component_by_cid($node->nid,$key)->extra);
+			$object_type = $object_typeextra['sf_subobject'];
+		
+			$records = _salesforce_rules_rules_submission_insert_get_records($components,$submission,$key);
+			
+			$records[0][$object_typeextra['sf_subobject_reference']] = $sfid;
+			$result = salesforce_api_upsert($records, $object_type); // upserts on Id
+		
+			error_log(print_r($result,true));
+		}
+	}
+}
+
+
+/**
+ * Upsert the object in Salesforce on a specific key, and return the id or
+ * 
+ * @param $object: data to be submitted to Salesforce
+ * @param $type: on of _salesforce_rules_get_types()
+ * @param $key
+ *
+ * @return Salesforce Object Id or false if failed
+ */
+function _salesforce_rules_object_upsert_with_key($object,$type,$key = "Id") {
+	// Upsert it into SalesForce
+	$result = salesforce_api_upsert($object, $type, $key);
+	
+	// log status
+	watchdog('salesforce_rules', t("Upserting %records on %upsertvalue with result %result",array("%upsertvalue" => $type, "%records" => print_r($object,true), "%result" => print_r($result,true))));
+
+	if (isset($result['successes'][0]))
+	{
+		if (isset($result['created'][0]))
+		{
+			$sfid = $result['created'][0];
+		}
+		else if (isset($result['updated'][0]))
+		{
+			$sfid = $result['updated'][0];
+		}
+		return $sfid;
+		
+	} else {	
+		return false;
+	}
+}
+
+// SALESFORCE API FUNCTIONS
+
+/**
+ * Private Function (only to be used from within this module)
+ * 
+ * This function is called by the hook_form_alter callbacks to provide 
+ * the types available in Salesforce.
+ */
+function _salesforce_rules_get_types() {
+	foreach (salesforce_api_describeGlobal()->types as $type)
+	{
+		$types[$type->name] = $type->label;
+	}
+	asort($types);
+	return $types;
+}
+
+function _salesforce_rules_get_component_by_cid($nid,$cid) {
+	/*
+	$result = db_select('salesforce_rules_fieldmaps', 'swf')
+						->fields('swf', array('sffname'))
+						->condition('nid', $nid)
+						->condition('cid', $cid)
+						->execute()
+						->fetchObject();
+	*/
+
+	$result = db_select('webform_component', 'swf')
+						->fields('swf', array('extra'))
+						->condition('nid', $nid)
+						->condition('cid', $cid)
+						->execute()
+						->fetchObject();
+
+	return $result;
+//	return unserialize($result->extra)['sf_subobject'];
+}
+
+/**
+ * get a list of Salesforce Fields of components that are marked as a key
+ */
+function _salesforce_rules_get_keylist($nid) {
+	$result = db_select('salesforce_rules_fieldmaps', 'swf')
+		->fields('swf', array('sffname'))
+		->condition('nid', $nid)
+		->condition('sffkey', 1)
+		->execute()
+		->fetchCol();
+	
+	return $result;
+}
+
+function _salesforce_rules_get_available_objects($nid) {
+	// MYSQL queries
+	
+	$data = db_query("select nid,cid,name,extra from {webform_component} WHERE type='sf_subobject' AND nid = ".$nid)->fetchAll();
+	
+	$options = array();
+	if ($data) {
+		foreach ($data as $subobject) {
+ 			$options[$subobject->cid] = $subobject->name;
+		}
+	}
+	
+	asort($options);
+	$options = array("node" => "-- main -- ") + $options;
+	
+	return $options;
+}
+
+/**
+ * Private Function (only to be used from within this module)
+ * 
+ * This function is called by the hook_form_alter callbacks to provide 
+ * the campaigns available in Salesforce.
+ */
+function _salesforce_rules_get_campaigns() {
+  $options = array();
+  $records = salesforce_api_query("SELECT Id, Name from Campaign");
+  foreach ($records as $record) {
+    $sObject = new SObject($record);
+    $options[$sObject->Id] = $sObject->Name;
+  }
+  return $options;
+}
+
+/**
+ * Private Function (only to be used from within this module)
+ * 
+ * This function is called by the hook_form_alter callbacks to provide 
+ * the campaign statuses available in Salesforce.
+ */
+function _salesforce_rules_get_campaign_status() {
+  $options = array();
+  $records = salesforce_api_query("SELECT Label from CampaignMemberStatus");
+  foreach ($records as $record) {
+    $sObject = new SObject($record);
+    $options[$sObject->Label] = $sObject->Label;
+  }
+  return $options;
+}
+
+function _salesforce_rules_load_object_fields ($selected) {
+  foreach (salesforce_api_describeSObject($selected)->fields as $field)
+	{
+		$options[$field->name] = $field->label;
+	}
+	asort($options);
+  return $options; 
+}
+
+// STEP 1: Make salesforce structure available as tokens in Rules action
+
+/**
+ * Implements hook_rules_data_info().
+ * http://drupalcontrib.org/api/drupal/contributions!rules!rules.api.php/function/hook_rules_data_info/7
+ */
+function salesforce_rules_data_info() {
+  return array(
+    'salesforce_rules_data' => array(
+      'label' => t('VUB events data'),
+      'group' => t('VUB Events'),
+      'token type' => 'salesforce_rules',
+      'property info' => array(),
+    ),
+  );
+}
+
+/**
+ * Implements hook_token_info().
+ */
+function salesforce_rules_token_info() {
+
+  $types['salesforce_rules'] = array(
+    'name' => t('salesforce Rules-----'),
+    'description' => t('Submission tokens.'),
+  );
+  $contactproperties = _salesforce_webform_load_object_fields('Contact');
+  foreach($contactproperties as $k=>$v) {
+  $salesforce_rules[$k] = array(
+    'name' => t($v),
+    'description' => t('The unique identifier of the submission.'),
+  );    
+  }
+
+  $tokens = array(
+    'types' => $types,
+    'tokens' => array(
+      'salesforce_rules' => $salesforce_rules,
+    ),  
+  );
+
+    return $tokens;
+}
+
+?>
